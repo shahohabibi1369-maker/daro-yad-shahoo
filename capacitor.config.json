@@ -1,0 +1,11 @@
+{
+  "appId": "com.shahoo.daroyad",
+  "appName": "دارو یاد شاهو",
+  "webDir": "www",
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_dose",
+      "iconColor": "#0B4F3D"
+    }
+  }
+}
