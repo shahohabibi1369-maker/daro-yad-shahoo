@@ -1,0 +1,90 @@
+name: Build APK and AAB
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'app.html'
+      - 'setup.py'
+      - 'package.json'
+      - 'capacitor.config.json'
+      - 'icon.png'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+      KS_B64: ${{ secrets.KEYSTORE_B64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Prepare web files
+        run: |
+          mkdir -p www
+          cp app.html www/index.html
+
+      - name: Install Capacitor
+        run: npm install
+
+      - name: Add Android project
+        run: npx cap add android
+
+      - name: Keystore
+        run: |
+          CLEAN=$(printf '%s' "$KS_B64" | tr -d ' \t\r\n')
+          echo "Secret length after cleanup: ${#CLEAN} (expected 3424)"
+          F="$RUNNER_TEMP/upload.p12"
+          if [ -z "$CLEAN" ]; then
+            echo "RESULT: KEYSTORE_B64 secret is empty. Building debug APK only."
+          elif ! printf '%s' "$CLEAN" | base64 -d > "$F" 2>/dev/null; then
+            echo "RESULT: KEYSTORE_B64 is not valid base64 (text was cut or changed). Building debug APK only."
+          elif ! keytool -list -keystore "$F" -storepass "$KS_PASS" > /dev/null 2>&1; then
+            echo "RESULT: keystore decoded but KEYSTORE_PASSWORD is wrong or file is damaged. Building debug APK only."
+          else
+            echo "KS_FILE=$F" >> "$GITHUB_ENV"
+            echo "RESULT: Keystore OK. A signed AAB will be built."
+          fi
+
+      - name: Customize Android project
+        run: |
+          pip install pillow
+          python3 setup.py
+
+      - name: Sync
+        run: npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Build release AAB
+        if: env.KS_FILE != ''
+        run: |
+          cd android
+          ./gradlew bundleRelease
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Daro Yad Shahoo v${{ github.run_number }}
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/bundle/release/app-release.aab
